@@ -36,3 +36,148 @@
     transform: rotate(360deg);
   }
 }
+
+.draggable-item {
+  transition: box-shadow 0.3s;
+}
+
+.draggable-item.dragging {
+  box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.2);
+  opacity: 0.8;
+}
+
+.droppable-area {
+  min-height: 50px;
+  padding: 8px;
+  background-color: #f8f8f8;
+  border: 2px dashed #007bff;
+}
+.textLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: transparent; /* Hide the original text if necessary, but keep it selectable */
+  font-family: sans-serif;
+  line-height: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* Allow mouse clicks to pass through text layer */
+}
+
+.textLayer span {
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0% 0%;
+  pointer-events: auto; /* Allows clicking on the text elements */
+  background-color: rgba(255, 255, 0, 0.3); /* Optional: highlight for debugging */
+}
+
+.endOfContent {
+  display: none;
+}
+
+.enhanced-table-editor {
+  position: relative;
+  border: 1px solid #ccc;
+  background-color: #f9f9f9;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.table-overlay {
+  border: 2px solid #007bff;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.7);
+  overflow: hidden;
+}
+
+table.modern-table {
+  width: 100%;
+  height: 100%;
+  border-collapse: collapse;
+}
+
+table.modern-table td {
+  border: 1px solid #ddd;
+  background-color: #fff;
+  transition: background-color 0.3s;
+}
+
+table.modern-table td:hover {
+  background-color: #f1f1f1;
+}
+
+.add-row-button,
+.add-column-button {
+  width: 20px;
+  height: 20px;
+  background-color: #007bff;
+  color: #fff;
+  font-size: 14px;
+  font-weight: bold;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.add-row-button:hover,
+.add-column-button:hover {
+  background-color: #0056b3;
+}
+.pdf-canvas-container {
+  position: relative;
+  border: 1px solid #ccc;
+  margin-bottom: 20px;
+}
+
+.pdf-canvas {
+  width: 100%;
+  height: auto;
+}
+
+.drawing-box {
+  position: absolute;
+  border: 1px dashed blue;
+}
+
+.editable-table {
+  margin-top: 10px;
+}
+
+.table-control-button {
+  background-color: #f0f0f0;
+  border: none;
+  cursor: pointer;
+  padding: 5px;
+  margin: 2px;
+  border-radius: 4px;
+}
+
+.table-control-button:hover {
+  background-color: #e0e0e0;
+}
+
+.editable-cell {
+  border: 1px solid #ddd;
+  padding: 10px;
+}
+
+.table-control-cell {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.table-control-row {
+  text-align: center;
+}
+
+@keyframes fade-in {
+  from {
+      opacity: 0;
+  }
+  to {
+      opacity: 1;
+  }
+}
