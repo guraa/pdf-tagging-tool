@@ -1,248 +1,228 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Rnd } from 'react-rnd';
-import 'font-awesome/css/font-awesome.min.css';
-import _ from 'lodash';
+import React, { useState, useEffect } from "react";
+import PropTypes from "prop-types";
+import * as pdfjsLib from "pdfjs-dist";
 
-const EditableTable = ({ initialRows = 3, initialCols = 3, onTableChange, box }) => {
-    const [rows, setRows] = useState(null);
-    const [cols, setCols] = useState(null);
-    const [dimensions, setDimensions] = useState({ width: box.width, height: box.height });
+// 📌 Debugging Log Function
+const debugLog = (message, data) => {
+  console.log(`🛠️ ${message}:`, data);
+};
 
-    // Initialize rows and columns only once
-    useEffect(() => {
-        if (rows === null && cols === null) {
-            setRows(Array(initialRows).fill(box.height / initialRows));
-            setCols(Array(initialCols).fill(box.width / initialCols));
+// 📌 Spinner Component
+const Spinner = () => (
+  <div style={{ textAlign: "center", padding: "10px" }}>
+    <div className="spinner" style={{
+      width: "40px",
+      height: "40px",
+      border: "5px solid rgba(0,0,0,0.1)",
+      borderTop: "5px solid blue",
+      borderRadius: "50%",
+      animation: "spin 1s linear infinite"
+    }}></div>
+  </div>
+);
+
+const EditableTable = ({ pdfDoc, box, onTableChange }) => {
+  const [tableData, setTableData] = useState([]);
+  const [rowPositions, setRowPositions] = useState([]);
+  const [colPositions, setColPositions] = useState([]);
+  const [loading, setLoading] = useState(true); // Track loading state
+
+  debugLog("📌 Rendering EditableTable with pdfDoc:", pdfDoc);
+  debugLog("📌 Received box details:", box);
+
+  // 📌 Always call `useEffect()` first
+  useEffect(() => {
+    if (!pdfDoc || !box || typeof box.page === "undefined") {
+      debugLog("⚠️ Missing pdfDoc or box.page", { pdfDoc, box });
+      setLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const extractTableFromPdf = async () => {
+      try {
+        debugLog("📄 Getting page", box.page);
+        const page = await pdfDoc.getPage(box.page);
+        debugLog("✅ Page loaded successfully!");
+
+        debugLog("🔍 Extracting text content within the table region...");
+        const textContent = await page.getTextContent();
+
+        if (!textContent.items.length) {
+          debugLog("⚠️ No text found in the page.");
+          return;
         }
-    }, [rows, cols, initialRows, initialCols, box.height, box.width]);
 
-    const updateTableData = useCallback(() => {
-        if (!rows || !cols) return;
+        // 🔍 Extract relevant text inside the selected box region
+        const extractedRows = textContent.items
+          .map((item) => ({
+            text: item.str.trim(),
+            x: item.transform[4], // X-coordinate in PDF
+            y: item.transform[5], // Y-coordinate in PDF
+          }))
+          .filter((item) => 
+            item.x >= box.x &&
+            item.x <= box.x + box.width &&
+            item.y >= box.y &&
+            item.y <= box.y + box.height
+          );
 
-        const rowPositions = rows.reduce(
-            (acc, height, idx) => [...acc, (acc[idx - 1] || 0) + height],
-            []
-        );
-        const colPositions = cols.reduce(
-            (acc, width, idx) => [...acc, (acc[idx - 1] || 0) + width],
-            []
-        );
+        if (extractedRows.length === 0) {
+          debugLog("⚠️ No text found inside the selected table region.");
+          return [];
+        }
 
-        const updatedTableData = {
-            rowCount: rows.length,
-            colCount: cols.length,
-            rowPositions,
-            colPositions,
-        };
+        debugLog("🔍 Extracted text items inside box", extractedRows);
 
-        console.log('EditableTable updateTableData:', updatedTableData);
-        onTableChange(updatedTableData);
-    }, [rows, cols, onTableChange]);
+        // 📌 Sort items by y-position (to form rows) and then by x-position (columns)
+        extractedRows.sort((a, b) => b.y - a.y || a.x - b.x);
 
-    // Ensure table updates on rows/cols changes
-    useEffect(() => {
-        updateTableData();
-    }, [rows, cols, updateTableData]);
+        // 📌 Group into rows based on y-coordinates
+        const rows = [];
+        let currentRow = [];
+        let previousY = extractedRows[0].y;
 
-    const handleResizeRow = (rowIndex, deltaHeight) => {
-        setRows((prev) => {
-            const updatedRows = [...prev];
-            const newHeight = Math.max(updatedRows[rowIndex] + deltaHeight, 10);
-            const heightDiff = updatedRows[rowIndex] - newHeight;
-
-            updatedRows[rowIndex] = newHeight;
-            if (rowIndex < updatedRows.length - 1) {
-                updatedRows[rowIndex + 1] += heightDiff;
-            }
-            return updatedRows;
+        extractedRows.forEach((item) => {
+          if (Math.abs(item.y - previousY) < 5) {
+            currentRow.push(item.text);
+          } else {
+            rows.push(currentRow);
+            currentRow = [item.text];
+            previousY = item.y;
+          }
         });
+
+        if (currentRow.length > 0) rows.push(currentRow);
+
+        debugLog("✅ Final extracted table", rows);
+
+        if (isMounted) {
+          setTableData(rows);
+          // Compute row and column positions dynamically
+          const rowCount = rows.length;
+          const colCount = rows[0]?.length || 1;
+          setRowPositions(Array.from({ length: rowCount }, (_, i) => (i * box.height) / rowCount));
+          setColPositions(Array.from({ length: colCount }, (_, i) => (i * box.width) / colCount));
+        }
+      } catch (error) {
+        console.error("❌ Error extracting table:", error);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
     };
 
-    const handleResizeCol = (colIndex, deltaWidth) => {
-        setCols((prev) => {
-            const updatedCols = [...prev];
-            const newWidth = Math.max(updatedCols[colIndex] + deltaWidth, 10);
-            const widthDiff = updatedCols[colIndex] - newWidth;
+    extractTableFromPdf();
 
-            updatedCols[colIndex] = newWidth;
-            if (colIndex < updatedCols.length - 1) {
-                updatedCols[colIndex + 1] += widthDiff;
-            }
-            return updatedCols;
-        });
+    return () => {
+      isMounted = false; // Cleanup effect
     };
+  }, [pdfDoc, box]);
 
-    const handleAddRow = (e) => {
-        e.preventDefault(); 
-        setRows((prev) => {
-            const totalHeight = dimensions.height;
-            return [...prev, totalHeight / (prev.length + 1)].map(() => totalHeight / (prev.length + 1));
-        });
-    };
-    
-    const handleAddCol = (e) => {
-        e.preventDefault();
-        setCols((prev) => {
-            const totalWidth = dimensions.width;
-            return [...prev, totalWidth / (prev.length + 1)].map(() => totalWidth / (prev.length + 1));
-        });
-    };
-    
-    const handleRemoveRow = (e) => {
-        e.preventDefault(); 
-        setRows((prev) => {
-            if (prev.length > 1) {
-                return prev.slice(0, -1);
-            }
-            return prev;
-        });
-    };
-    
-    const handleRemoveCol = (e) => {
-        e.preventDefault(); 
-        setCols((prev) => {
-            if (prev.length > 1) {
-                return prev.slice(0, -1);
-            }
-            return prev;
-        });
-    };
-    
+  // 📌 Conditional rendering is handled AFTER `useEffect`
+  if (!box || !box.containsTable) {
+    return <div style={{ padding: "10px", color: "gray" }}>No table detected.</div>;
+  }
 
-    const handleMouseDownRow = (rowIndex, startY) => {
-        const handleMouseMove = (event) => {
-            const deltaHeight = event.clientY - startY;
-            handleResizeRow(rowIndex, deltaHeight);
-            startY = event.clientY;
-        };
-        const handleMouseUp = () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-            updateTableData();
-        };
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-    };
+  if (loading) {
+    return <Spinner />;
+  }
 
-    const handleMouseDownCol = (colIndex, startX) => {
-        const handleMouseMove = (event) => {
-            const deltaWidth = event.clientX - startX;
-            handleResizeCol(colIndex, deltaWidth);
-            startX = event.clientX;
-        };
-        const handleMouseUp = () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-            updateTableData();
-        };
-        window.addEventListener('mousemove', handleMouseMove);
-        window.addEventListener('mouseup', handleMouseUp);
-    };
-
-    return (
-        <Rnd
-            bounds="parent"
-            default={{
-                x: box.x,
-                y: box.y,
-                width: box.width,
-                height: box.height,
-            }}
-            size={{ width: dimensions.width, height: dimensions.height }}
-            onResize={(e, dir, ref) => setDimensions({ width: ref.offsetWidth, height: ref.offsetHeight })}
+  return (
+    <div
+      style={{
+        position: "relative",
+        width: `${box.width}px`,
+        height: `${box.height}px`,
+        border: "1px solid black",
+      }}
+    >
+      {/* Draw detected row lines */}
+      {rowPositions.map((y, index) => (
+        index > 0 && (
+          <div
+            key={`row-${index}`}
             style={{
-                position: 'absolute',
-                border: '1px solid red',
-                overflow: 'visible',
+              position: "absolute",
+              top: `${y}px`,
+              left: "0",
+              width: "100%",
+              height: "1px",
+              backgroundColor: "black",
             }}
-            disableDragging
-            enableResizing={{
-                bottom: true,
-                right: true,
-                bottomRight: true,
-            }}
-        >
-            <div
-                style={{
-                    position: 'absolute',
-                    left: '-50px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    zIndex: 10,
-                }}
-            >
-                <button onClick={handleAddRow} style={{ marginBottom: '5px' }}>+</button>
-                <button onClick={handleRemoveRow}>-</button>
-            </div>
-            <div
-                style={{
-                    position: 'absolute',
-                    top: '-50px',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    display: 'flex',
-                    gap: '10px',
-                    zIndex: 10,
-                }}
-            >
-                <button onClick={handleAddCol}>+</button>
-                <button onClick={handleRemoveCol}>-</button>
-            </div>
+          />
+        )
+      ))}
 
-            <div
-                style={{
-                    display: 'grid',
-                    gridTemplateRows: rows?.map((height) => `${height}px`).join(' ') || '',
-                    gridTemplateColumns: cols?.map((width) => `${width}px`).join(' ') || '',
-                    width: '100%',
-                    height: '100%',
-                    position: 'relative',
-                }}
-            >
-                {rows?.map((_, rowIndex) =>
-                    cols?.map((_, colIndex) => (
-                        <div
-                            key={`${rowIndex}-${colIndex}`}
-                            style={{
-                                border: '1px solid black',
-                                position: 'relative',
-                                boxSizing: 'border-box',
-                            }}
-                        >
-                            {rowIndex < rows.length - 1 && (
-                                <div
-                                    style={{
-                                        position: 'absolute',
-                                        bottom: 0,
-                                        left: 0,
-                                        width: '100%',
-                                        height: '5px',
-                                        cursor: 'ns-resize',
-                                    }}
-                                    onMouseDown={(e) => handleMouseDownRow(rowIndex, e.clientY)}
-                                />
-                            )}
-                            {colIndex < cols.length - 1 && (
-                                <div
-                                    style={{
-                                        position: 'absolute',
-                                        top: 0,
-                                        right: 0,
-                                        width: '5px',
-                                        height: '100%',
-                                        cursor: 'ew-resize',
-                                    }}
-                                    onMouseDown={(e) => handleMouseDownCol(colIndex, e.clientX)}
-                                />
-                            )}
-                        </div>
-                    ))
-                )}
-            </div>
-        </Rnd>
-    );
+      {/* Draw detected column lines */}
+      {colPositions.map((x, index) => (
+        index > 0 && (
+          <div
+            key={`col-${index}`}
+            style={{
+              position: "absolute",
+              left: `${x}px`,
+              top: "0",
+              height: "100%",
+              width: "1px",
+              backgroundColor: "black",
+            }}
+          />
+        )
+      ))}
+
+      {/* Render extracted table cells */}
+      {tableData.map((row, rowIndex) => (
+        row.map((cell, colIndex) => (
+          <div
+            key={`${rowIndex}-${colIndex}`}
+            style={{
+              position: "absolute",
+              top: `${rowPositions[rowIndex]}px`,
+              left: `${colPositions[colIndex]}px`,
+              width: `${colPositions[colIndex + 1] - colPositions[colIndex]}px`,
+              height: `${rowPositions[rowIndex + 1] - rowPositions[rowIndex]}px`,
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              backgroundColor: "white",
+            }}
+          >
+            <input
+              type="text"
+              value={cell || ""}
+              onChange={(e) => {
+                const updatedTable = [...tableData];
+                updatedTable[rowIndex][colIndex] = e.target.value;
+                setTableData(updatedTable);
+              }}
+              style={{
+                width: "100%",
+                height: "100%",
+                border: "none",
+                outline: "none",
+                textAlign: "center",
+                backgroundColor: "transparent",
+              }}
+            />
+          </div>
+        ))
+      ))}
+    </div>
+  );
+};
+
+EditableTable.propTypes = {
+  pdfDoc: PropTypes.object,
+  box: PropTypes.shape({
+    containsTable: PropTypes.bool,
+    width: PropTypes.number.isRequired,
+    height: PropTypes.number.isRequired,
+    x: PropTypes.number.isRequired,
+    y: PropTypes.number.isRequired,
+    page: PropTypes.number,
+  }).isRequired,
+  onTableChange: PropTypes.func.isRequired,
 };
 
 export default EditableTable;

@@ -1,172 +1,251 @@
-import React, { memo } from 'react';
-import { Droppable, Draggable } from '@hello-pangea/dnd';
-import { Badge } from 'react-bootstrap';
-import { FaTimes, FaGripVertical } from 'react-icons/fa';
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Droppable, Draggable } from "@hello-pangea/dnd";
+import { Badge, Button, Form } from "react-bootstrap";
+import { renderPage } from "./DrawCanvas";
+import { FaTimes, FaGripVertical, FaImage, FaHeading, FaTable } from "react-icons/fa";
 
-const getBadgeVariant = (type) => {
-  switch (type) {
-    case 'H1':
-      return 'danger';
-    case 'H2':
-      return 'success';
-    case 'H3':
-      return 'primary';
-    case 'image':
-      return 'warning';
-    default:
-      return 'secondary';
-  }
+// Define colors for each tag type
+const tagColors = {
+  image: "#ffc107", // Yellow
+  h1: "#dc3545", // Red
+  h2: "#28a745", // Green
+  h3: "#007bff", // Blue
+  h4: "#17a2b8", // Teal
+  table: "#6c757d", // Grey
 };
 
-const getIndentation = (type) => {
-  switch (type) {
-    case 'H1':
-      return '0px';
-    case 'H2':
-      return '20px';
-    case 'H3':
-      return '40px';
-    default:
-      return '60px';
-  }
+// Define icons for each tag type
+const tagIcons = {
+  image: <FaImage />,
+  h1: <FaHeading size={14} />,
+  h2: <FaHeading size={12} />,
+  h3: <FaHeading size={10} />,
+  h4: <FaHeading size={8} />,
+  table: <FaTable />,
 };
 
+// Section and tag style
+const sectionStyle = {
+  padding: "10px",
+  border: "2px dashed #007bff",
+  borderRadius: "8px",
+  backgroundColor: "#f8f9fa",
+  minHeight: "50px",
+};
 
+const TaggedElementsView = ({
+  taggedElements = [],
+  setTaggedElements,
+  pdfDoc,
+  currentPage,
+  canvasRef,
+}) => {
+  const [editingSection, setEditingSection] = useState(null);
+  const [sectionEditName, setSectionEditName] = useState("");
+  const debounceTimeout = useRef(null); // For debouncing rendering logic
 
-const TaggedElementsView = memo(({ taggedElements, setTaggedElements }) => {
-  const removeTaggedElement = (sectionIndex, childIndex) => {
-      setTaggedElements((prevElements) => {
-          const newElements = [...prevElements];
-          if (typeof childIndex !== 'undefined') {
-              newElements[sectionIndex].children.splice(childIndex, 1);
-          } else {
-              newElements.splice(sectionIndex, 1);
-          }
-          return newElements;
-      });
+  // Start editing section name
+  const startEditingSection = (section) => {
+    setEditingSection(section.id);
+    setSectionEditName(section.name);
   };
+
+  // Flatten nested elements for rendering
+  const flattenElements = (elements) => {
+    return elements.flatMap((el) =>
+      el.type === "section" ? flattenElements(el.children || []) : el
+    );
+  };
+
+  // Re-render the canvas when taggedElements are updated
+  useEffect(() => {
+    let isCancelled = false;
+
+    const render = async () => {
+      const flatElements = flattenElements(taggedElements); // Flatten nested structures
+      await renderPage(pdfDoc, currentPage, canvasRef, flatElements, isCancelled);
+    };
+
+    if (canvasRef.current && pdfDoc) {
+      // Clear any previous debounce timer
+      if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+
+      // Set a debounce timer
+      debounceTimeout.current = setTimeout(() => render(), 100);
+
+      return () => {
+        isCancelled = true;
+        if (debounceTimeout.current) clearTimeout(debounceTimeout.current);
+      };
+    }
+  }, [pdfDoc, currentPage, taggedElements, canvasRef]);
+
+  // Save section name after editing
+  const saveSectionEdit = (sectionId) => {
+    setTaggedElements((prev) =>
+      prev.map((section) =>
+        section.id === sectionId ? { ...section, name: sectionEditName } : section
+      )
+    );
+    setEditingSection(null);
+    setSectionEditName("");
+  };
+
+  // Delete a section and move tags to ungrouped items
+  const deleteSection = (sectionId) => {
+    setTaggedElements((prev) => {
+      const sectionToDelete = prev.find((section) => section.id === sectionId);
+      if (sectionToDelete) {
+        const ungroupedItems = sectionToDelete.children || [];
+        return [
+          ...prev.filter((section) => section.id !== sectionId),
+          ...ungroupedItems.map((item) => ({ ...item, sectionName: "" })),
+        ];
+      }
+      return prev;
+    });
+  };
+
+  // Add a new section
+  const addNewSection = () => {
+    const newSection = {
+      id: Date.now(),
+      name: `New Section`,
+      type: "section",
+      children: [],
+    };
+
+    setTaggedElements((prev) => [...prev, newSection]);
+  };
+
+  // Render a section
+  const renderSection = (section, sectionIndex) => (
+    <Draggable key={section.id} draggableId={`section-${section.id}`} index={sectionIndex}>
+      {(provided) => (
+        <div
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          {...provided.dragHandleProps}
+          style={sectionStyle}
+          className="mb-3"
+        >
+          {/* Section Header */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center" }}>
+              <FaGripVertical style={{ marginRight: "8px", cursor: "grab" }} />
+              {editingSection === section.id ? (
+                <Form.Control
+                  type="text"
+                  value={sectionEditName}
+                  onChange={(e) => setSectionEditName(e.target.value)}
+                  onBlur={() => saveSectionEdit(section.id)}
+                  autoFocus
+                />
+              ) : (
+                <h5
+                  style={{ margin: 0, cursor: "pointer" }}
+                  onClick={() => startEditingSection(section)}
+                >
+                  {section.name}
+                </h5>
+              )}
+            </div>
+            <FaTimes
+              onClick={() => deleteSection(section.id)}
+              style={{ cursor: "pointer", color: "red", marginLeft: "10px" }}
+            />
+          </div>
+
+          {/* Droppable Area for Section Items */}
+          <Droppable droppableId={`section-${section.id}`} type="ITEM">
+            {(provided) => (
+              <div
+                ref={provided.innerRef}
+                {...provided.droppableProps}
+                style={{ ...sectionStyle, marginTop: "10px" }}
+              >
+                {section.children?.map((child, childIndex) =>
+                  renderDraggableItem(child, childIndex)
+                )}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </div>
+      )}
+    </Draggable>
+  );
+
+  // Render a draggable item
+  const renderDraggableItem = (item, index) => (
+    <Draggable key={item.id} draggableId={`child-${item.id}`} index={index}>
+      {(provided) => (
+        <div
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          {...provided.dragHandleProps}
+          className="mb-2 d-flex align-items-center"
+        >
+          <Badge
+            pill
+            style={{
+              backgroundColor: tagColors[item.tag],
+              color: "white",
+            }}
+            className="me-2 d-flex align-items-center"
+          >
+            {tagIcons[item.tag]} <span className="ms-1">{item.tag} - {item.name}</span>
+          </Badge>
+        </div>
+      )}
+    </Draggable>
+  );
+
+  // Render ungrouped items
+  const renderUngroupedItems = () => (
+    <Droppable droppableId="ungrouped-items" type="ITEM">
+      {(provided) => (
+        <div ref={provided.innerRef} {...provided.droppableProps}>
+          <h6>Ungrouped Items</h6>
+          <div style={sectionStyle}>
+            {taggedElements
+              .filter((el) => !el.sectionName && el.type !== "section")
+              .map((item, index) => renderDraggableItem(item, index))}
+            {provided.placeholder}
+          </div>
+        </div>
+      )}
+    </Droppable>
+  );
 
   return (
     <>
+      {/* Render Sections */}
       <Droppable droppableId="sections" type="SECTION">
-                {(provided) => (
-                    <div ref={provided.innerRef} {...provided.droppableProps}>
-                        {taggedElements
-                            .filter((section) => section.type === 'section')
-                            .map((section, sectionIndex) => {
-                                // Generate unique keys based on id and fallback to index if id is missing
-                                const sectionKey = section.id ? `section-${section.id}` : `section-index-${sectionIndex}`;
-                                return (
-                                    <Draggable
-                                        key={sectionKey}  // Use unique key for section
-                                        draggableId={sectionKey}  // Unique draggableId
-                                        index={sectionIndex}
-                                    >
-                                        {(provided) => (
-                                            <div
-                                                ref={provided.innerRef}
-                                                {...provided.draggableProps}
-                                                className="mb-3 alert alert-primary"
-                                            >
-                                                <div {...provided.dragHandleProps} style={{ display: 'flex', alignItems: 'center' }}>
-                                                    <FaGripVertical style={{ marginRight: '8px', cursor: 'grab' }} />
-                                                    <h5 style={{ margin: 0 }}>{section.name}</h5>
-                                                </div>
-                                                <Droppable droppableId={sectionKey} type="ITEM">
-                                                    {(provided) => (
-                                                        <div
-                                                            ref={provided.innerRef}
-                                                            {...provided.droppableProps}
-                                                            style={{
-                                                                padding: '10px',
-                                                                backgroundColor: '#f0f8ff',
-                                                                borderRadius: '8px',
-                                                                minHeight: '50px',
-                                                            }}
-                                                        >
-                                                            {section.children.map((child, childIndex) => {
-                                                                const childKey = child.id ? `child-${child.id}` : `child-index-${childIndex}`;
-                                                                return (
-                                                                    <Draggable
-                                                                        key={childKey}  // Ensure unique key for child
-                                                                        draggableId={childKey}  // Ensure unique draggableId for child
-                                                                        index={childIndex}
-                                                                    >
-                                                                        {(provided) => (
-                                                                            <div
-                                                                                ref={provided.innerRef}
-                                                                                {...provided.draggableProps}
-                                                                                {...provided.dragHandleProps}
-                                                                                className="mb-2 d-flex align-items-center"
-                                                                            >
-                                                                                <Badge pill variant={getBadgeVariant(child.tag)}>
-                                                                                    {child.tag} - {child.name}
-                                                                                </Badge>
-                                                                                <FaTimes
-                                                                                    onClick={() => removeTaggedElement(sectionIndex, childIndex)}
-                                                                                    style={{ marginLeft: '8px', cursor: 'pointer', color: 'red' }}
-                                                                                />
-                                                                            </div>
-                                                                        )}
-                                                                    </Draggable>
-                                                                );
-                                                            })}
-                                                            {provided.placeholder}
-                                                        </div>
-                                                    )}
-                                                </Droppable>
-                                            </div>
-                                        )}
-                                    </Draggable>
-                                );
-                            })}
-                        {provided.placeholder}
-                    </div>
-                )}
-            </Droppable>
+        {(provided) => (
+          <div ref={provided.innerRef} {...provided.droppableProps}>
+            {taggedElements
+              .filter((section) => section.type === "section")
+              .map((section, sectionIndex) => renderSection(section, sectionIndex))}
+            {provided.placeholder}
+          </div>
+        )}
+      </Droppable>
 
-            <Droppable droppableId="ungrouped-items" type="ITEM">
-                {(provided) => (
-                    <div ref={provided.innerRef} {...provided.droppableProps} className="mt-3">
-                        <h6>Ungrouped Items</h6>
-                        <div style={{ padding: '10px', border: '1px dashed #ccc', minHeight: '50px' }}>
-                            {taggedElements
-                                .filter((item) => item.type !== 'section')
-                                .map((element, index) => {
-                                    const elementKey = element.id ? `element-${element.id}` : `element-index-${index}`;
-                                    return (
-                                        <Draggable
-                                            key={elementKey}  // Unique key for ungrouped item
-                                            draggableId={elementKey}  // Unique draggableId
-                                            index={index}
-                                        >
-                                            {(provided) => (
-                                                <div
-                                                    ref={provided.innerRef}
-                                                    {...provided.draggableProps}
-                                                    {...provided.dragHandleProps}
-                                                    className="mb-2 d-flex align-items-center"
-                                                >
-                                                    <Badge pill variant={getBadgeVariant(element.tag)}>
-                                                        {element.tag} - {element.name}
-                                                    </Badge>
-                                                    <FaTimes
-                                                        onClick={() => removeTaggedElement(index)}
-                                                        style={{ marginLeft: '8px', cursor: 'pointer', color: 'red' }}
-                                                    />
-                                                </div>
-                                            )}
-                                        </Draggable>
-                                    );
-                                })}
-                            {provided.placeholder}
-                        </div>
-                    </div>
-                )}
-            </Droppable>
-        </>
-    );
-});
+      {/* Render Ungrouped Items */}
+      {renderUngroupedItems()}
 
+      <Button variant="primary" onClick={addNewSection} className="mt-3">
+        Add Section
+      </Button>
+    </>
+  );
+};
 
 export default TaggedElementsView;
