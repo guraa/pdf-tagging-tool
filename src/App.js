@@ -33,60 +33,45 @@ const convertTaggedElementsToCm = (taggedElements, viewportScale) => {
   }));
 };
 
-// 2. Update the App component with proper state management
 function App() {
-  // File and PDF related refs
   const fileInputRef = useRef(null);
   const pdfUploaderRef = useRef(null);
-  const canvasRef = useRef(null);
-  
-  // PDF document state
   const [pdfDoc, setPdfDoc] = useState(null);
   const [currentPage, setCurrentPage] = useState(0);
-  
-  // Modal states
   const [showTextModal, setShowTextModal] = useState(false);
   const [showAltTextModal, setShowAltTextModal] = useState(false);
   const [selectedAltText, setSelectedAltText] = useState("");
-  const [showMergeModal, setShowMergeModal] = useState(false);
-  const [showEditBoxModal, setShowEditBoxModal] = useState(false);
-  const [showTableEditModal, setShowTableEditModal] = useState(false);
-  const [showSectionModal, setShowSectionModal] = useState(false);
-  const [showInitialModal, setShowInitialModal] = useState(true);
-  const [showNewTemplateModal, setShowNewTemplateModal] = useState(false);
-  
-  // Box selection and drawing state
   const [drawBox, setDrawBox] = useState(null);
-  const [selectedBox, setSelectedBox] = useState(null);
   const [selectedBoxName, setSelectedBoxName] = useState("");
-  const [selectedBoxIndex, setSelectedBoxIndex] = useState(null);
-  const [selectedImageIndex, setSelectedImageIndex] = useState(null);
-  const [mergeCandidate, setMergeCandidate] = useState(null);
-  
-  // Tagged elements state
-  const [taggedElements, setTaggedElements] = useState([]);
-  const [selectedTableData, setSelectedTableData] = useState(null);
-  const [detectedTables, setDetectedTables] = useState([]);
-  
-  // Fonts and template state
-  const [uploadedFonts, setUploadedFonts] = useState([]);
-  const [templateName, setTemplateName] = useState("");
-  const [pdfFile, setPdfFile] = useState(null);
-  
-  // Text tagging state
   const [headingType, setHeadingType] = useState("Paragraph");
   const [language, setLanguage] = useState("sv");
+  const [selectedImageIndex, setSelectedImageIndex] = useState(null);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeCandidate, setMergeCandidate] = useState(null);
+  const [showEditBoxModal, setShowEditBoxModal] = useState(false);
+  const [selectedBoxIndex, setSelectedBoxIndex] = useState(null);
+  const [uploadedFonts, setUploadedFonts] = useState([]);
+  const [showSectionModal, setShowSectionModal] = useState(false);
   const [sectionName, setSectionName] = useState("");
-  
-  // Table state
-  const [rowCount, setRowCount] = useState(2);
-  const [colCount, setColCount] = useState(2);
+  const [taggedElements, setTaggedElements] = useState([]);
+  const [rowCount, setRowCount] = useState(2); // Default to 2 rows
+  const [colCount, setColCount] = useState(2); // Default to 2 columns
+  const [showTableEditModal, setShowTableEditModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [selectedBox, setSelectedBox] = useState(null);
+  const [useExistingTemplate, setUseExistingTemplate] = useState(false);
   const [rowPositions, setRowPositions] = useState([]);
   const [colPositions, setColPositions] = useState([]);
+  const [selectedTableData, setSelectedTableData] = useState(null);
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  
-  // Modal manager state
+  const [showInitialModal, setShowInitialModal] = useState(true);
+  const [showNewTemplateModal, setShowNewTemplateModal] = useState(false);
+  const [pdfFile, setPdfFile] = useState(null);
+  const [detectedTables, setDetectedTables] = useState([]);
+
+  let idCounter = 0;
+
   const [modalState, setModalState] = useState({
     taggingModal: false,
     mergeModal: false,
@@ -94,13 +79,11 @@ function App() {
     tableEditModal: false,
   });
 
-  // ID counter for generating unique IDs
-  let idCounter = 0;
-
   const handleCreateNew = () => {
     setShowInitialModal(false);
     setShowNewTemplateModal(true);
   };
+
 
   const handleLoadExisting = () => {
     setShowInitialModal(false);
@@ -126,8 +109,24 @@ function App() {
       Math.random() * 1000
     )}`;
   };
+  const canvasRef = useRef(null);
 
-  // Update selectedBox when taggedElements change
+  const handleSaveTableData = (updatedTableData) => {
+    console.log("Saving updated table data:", updatedTableData);
+
+    setTaggedElements((prevElements) =>
+      prevElements.map((el) =>
+        el.id === updatedTableData.id ? { ...el, ...updatedTableData } : el
+      )
+    );
+
+    setSelectedBox((prev) =>
+      prev?.id === updatedTableData.id ? { ...prev, ...updatedTableData } : prev
+    );
+
+    console.log("Updated taggedElements:", taggedElements);
+  };
+
   useEffect(() => {
     if (selectedBox) {
       const updatedBox = taggedElements.find((el) => el.id === selectedBox.id);
@@ -135,254 +134,67 @@ function App() {
         setSelectedBox(updatedBox);
       }
     }
-  }, [taggedElements, selectedBox]);
+  }, [taggedElements]);
 
   const extractImageBoxesFromPdf = async (pdf) => {
-    console.log("Starting enhanced image extraction process...");
-    const imageBoxes = []; 
-  
-    try {
-      for (let i = 1; i <= pdf.numPages; i++) {
-        console.log(`Processing page ${i} for images...`);
-        const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 1.5 });
-        
-        const operatorList = await page.getOperatorList();
-        const textContent = await page.getTextContent();
-        
-        const pageWidth = viewport.width;
-        const pageHeight = viewport.height;
-        
-        console.log(`Page dimensions: ${pageWidth}x${pageHeight}`);
-        
-        // Track image objects found on this page for debugging
-        const pageImages = [];
-        
-        // Process each operation
-        let currentState = {
-          transformStack: [],
-          currentTransform: [1, 0, 0, 1, 0, 0] // Identity matrix
-        };
-        
-        for (let j = 0; j < operatorList.fnArray.length; j++) {
-          const fn = operatorList.fnArray[j];
-          const args = operatorList.argsArray[j];
-          
-          if (fn === pdfjsLib.OPS.save) {
-            // Save current transform
-            currentState.transformStack.push([...currentState.currentTransform]);
-          } 
-          else if (fn === pdfjsLib.OPS.restore) {
-            // Restore previous transform
-            if (currentState.transformStack.length > 0) {
-              currentState.currentTransform = currentState.transformStack.pop();
-            }
-          } 
-          else if (fn === pdfjsLib.OPS.transform) {
-            // Apply new transform (matrix multiplication)
-            const [a1, b1, c1, d1, e1, f1] = currentState.currentTransform;
-            const [a2, b2, c2, d2, e2, f2] = args;
-            
-            // Matrix multiplication
-            currentState.currentTransform = [
-              a1 * a2 + c1 * b2,
-              b1 * a2 + d1 * b2,
-              a1 * c2 + c1 * d2,
-              b1 * c2 + d1 * d2,
-              a1 * e2 + c1 * f2 + e1,
-              b1 * e2 + d1 * f2 + f1
-            ];
-          } 
-          else if (fn === pdfjsLib.OPS.paintImageXObject || fn === pdfjsLib.OPS.paintJpegXObject) {
-            // Extract image info using the current transform
-            const [a, b, c, d, e, f] = currentState.currentTransform;
-            
-            // Get viewport scaling factors
-            const vpXScale = viewport.width / viewport.viewBox[2];
-            const vpYScale = viewport.height / viewport.viewBox[3];
-            
-            // Get image dimensions from transform matrix
-            const imgWidth = Math.abs(a) * vpXScale;
-            const imgHeight = Math.abs(d) * vpYScale;
-            
-            // Get image position
-            const imgX = e * vpXScale;
-            // In PDF coordinates, Y=0 is at the bottom. In HTML/canvas, Y=0 is at the top.
-            // PDF viewport handles this by using a transform that flips the Y-axis
-            
-            // CRITICAL FIX: Adjust Y-coordinate to match the actual image position
-            // Since we're in viewport coordinates, we use pageHeight to flip the Y-axis
-            const imgY = pageHeight - ((f * vpYScale) + imgHeight); // This is the key correction
-            
-            // Create image box
-            const imageName = args[0] || `Image-${imageBoxes.length + 1}`;
-            
-            // Filter out tiny or invalid images (likely decorative elements or artifacts)
-            if (imgWidth < 5 || imgHeight < 5 || 
-                isNaN(imgX) || isNaN(imgY) || 
-                isNaN(imgWidth) || isNaN(imgHeight)) {
-              console.log(`Skipping too small or invalid image: ${imageName}`);
-              continue;
-            }
-            
-            // Check if image is actually visible on the page (with some margin)
-            if (imgX < -50 || imgY < -50 || 
-                imgX > pageWidth + 50 || imgY > pageHeight + 50) {
-              console.log(`Skipping image outside viewport bounds: ${imageName}`);
-              continue;
-            }
-            
-            console.log(`Found image "${imageName}" at (${imgX.toFixed(1)}, ${imgY.toFixed(1)}) with size ${imgWidth.toFixed(1)}x${imgHeight.toFixed(1)}`);
-            
-            const imageBox = {
-              type: "image",
-              name: imageName,
-              x: imgX,
-              y: imgY,
-              width: imgWidth,
-              height: imgHeight,
-              page: i,
-              alt: "",
-              id: `image-${i}-${imageBoxes.length}-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-            };
-            
-            imageBoxes.push(imageBox);
-            pageImages.push(imageBox);
-          }
-        }
-        
-        console.log(`Found ${pageImages.length} images on page ${i}`);
-      }
-      
-      console.log(`Total of ${imageBoxes.length} images found`);
-      return imageBoxes;
-    } catch (error) {
-      console.error("Error in image extraction:", error);
-      return [];
-    }
-  };
-  const extractTableBoxesFromPdf = async (pdf) => {
-    try {
-      console.log("Starting table extraction from PDF...");
-      const tableBoxes = [];
-      
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 1.5 });
-        const textContent = await page.getTextContent();
+    const imageBoxes = [];
 
-        // Simple heuristic: Look for structured text that might be tables
-        // Group text items by y-coordinate (rows)
-        const rowGroups = {};
-        
-        if (textContent.items && textContent.items.length > 0) {
-          textContent.items.forEach(item => {
-            // Round y-coordinate to group nearby items
-            const roundedY = Math.round(item.transform[5] / 10) * 10;
-            
-            if (!rowGroups[roundedY]) {
-              rowGroups[roundedY] = [];
-            }
-            
-            rowGroups[roundedY].push({
-              text: item.str,
-              x: item.transform[4],
-              y: item.transform[5],
-              width: item.width || 20,
-              height: item.height || 12
-            });
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const operatorList = await page.getOperatorList();
+      const transformStack = [];
+      let currentTransformMatrix = new DOMMatrix();
+
+      operatorList.fnArray.forEach((fn, index) => {
+        const args = operatorList.argsArray[index];
+
+        if (fn === pdfjsLib.OPS.save) {
+          transformStack.push(currentTransformMatrix);
+        } else if (fn === pdfjsLib.OPS.restore) {
+          currentTransformMatrix = transformStack.pop() || new DOMMatrix();
+        } else if (fn === pdfjsLib.OPS.transform) {
+          const [a, b, c, d, e, f] = args;
+          currentTransformMatrix = currentTransformMatrix.multiply(
+            new DOMMatrix([a, b, c, d, e, f])
+          );
+        } else if (
+          fn === pdfjsLib.OPS.paintImageXObject ||
+          fn === pdfjsLib.OPS.paintJpegXObject
+        ) {
+          const imgX = currentTransformMatrix.e * viewport.scale;
+          const imgY = currentTransformMatrix.f * viewport.scale;
+          const imgWidth = Math.abs(currentTransformMatrix.a * viewport.scale);
+          const imgHeight = Math.abs(currentTransformMatrix.d * viewport.scale);
+          const adjustedImgY = viewport.height - imgY;
+
+          imageBoxes.push({
+            type: "image",
+            name: args[0],
+            x: imgX,
+            y: adjustedImgY,
+            width: imgWidth,
+            height: imgHeight,
+            page: i,
+            alt: "",
           });
-          
-          // Find rows with multiple items (potential table rows)
-          const tableRows = Object.values(rowGroups)
-            .filter(row => row.length >= 3) // At least 3 items in a row to be a table
-            .sort((a, b) => a[0].y - b[0].y); // Sort by y-coordinate
-          
-          // Look for consecutive rows that might form a table
-          if (tableRows.length >= 3) { // At least 3 rows to be a table
-            // Find min/max coordinates for all these rows
-            let minX = Infinity, maxX = 0, minY = Infinity, maxY = 0;
-            
-            tableRows.forEach(row => {
-              row.forEach(item => {
-                minX = Math.min(minX, item.x);
-                maxX = Math.max(maxX, item.x + item.width);
-                minY = Math.min(minY, item.y - item.height);
-                maxY = Math.max(maxY, item.y);
-              });
-            });
-            
-            // Add some padding
-            minX = Math.max(0, minX - 10);
-            minY = Math.max(0, minY - 10);
-            maxX = maxX + 10;
-            maxY = maxY + 10;
-            
-            // Convert to viewport coordinates - PDF has origin at bottom-left
-            const adjustedX = minX;
-            const adjustedY = viewport.height - maxY;
-            const adjustedWidth = maxX - minX;
-            const adjustedHeight = maxY - minY;
-            
-            // Create table box
-            tableBoxes.push({
-              type: "table",
-              name: `Table on page ${i}`,
-              x: adjustedX,
-              y: adjustedY,
-              width: adjustedWidth,
-              height: adjustedHeight,
-              page: i,
-              rowCount: tableRows.length,
-              colCount: Math.max(...tableRows.map(row => row.length)),
-              containsTable: true,
-              rowPositions: Array.from(
-                { length: tableRows.length + 1 },
-                (_, idx) => (idx * adjustedHeight) / tableRows.length
-              ),
-              colPositions: Array.from(
-                { length: Math.max(...tableRows.map(row => row.length)) + 1 },
-                (_, idx) => (idx * adjustedWidth) / Math.max(...tableRows.map(row => row.length))
-              )
-            });
-          }
         }
-      }
-      
-      console.log("Extracted tables:", tableBoxes);
-      return tableBoxes;
-    } catch (error) {
-      console.error("Error extracting tables:", error);
-      return [];
+      });
     }
+    return imageBoxes;
   };
 
   const handleSaveAltText = () => {
-    if (selectedImageIndex !== null && selectedImageIndex >= 0) {
-      setTaggedElements((prev) => {
-        const updatedTags = prev.map((el, index) => {
-          if (index === selectedImageIndex && el.type === "image") {
-            return { ...el, alt: selectedAltText };
-          }
-          return el;
-        });
-        return updatedTags;
+    setTaggedElements((prev) => {
+      const updatedTags = prev.map((el, index) => {
+        if (index === selectedImageIndex && el.type === "image") {
+          return { ...el, alt: selectedAltText };
+        }
+        return el;
       });
-    } else if (selectedBox && selectedBox.type === "image") {
-      // If we have a selected box but no index, update by ID
-      setTaggedElements((prev) => {
-        return prev.map((el) => {
-          if (el.id === selectedBox.id && el.type === "image") {
-            return { ...el, alt: selectedAltText };
-          }
-          return el;
-        });
-      });
-    }
-    
-    // Close any open modals
+      return updatedTags;
+    });
     setShowAltTextModal(false);
-    setModalState(prev => ({ ...prev, editBoxModal: false }));
   };
 
   const handleTemplateLoad = ({ jsonData, pdfDoc }) => {
@@ -397,6 +209,7 @@ function App() {
       taggedElements: jsonData.taggingInformation,
     });
   };
+
 
   const createTaggedPdf = async () => {
     try {
@@ -448,6 +261,34 @@ function App() {
       alert("An error occurred while creating the tagged PDF.");
     }
   };
+  
+
+  const extractTableBoxesFromPdf = async (pdf) => {
+    const tableBoxes = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1.5 });
+      const textContent = await page.getTextContent();
+
+      const tableDetected = textContent.items.some((item) =>
+        item.str.includes("Table")
+      );
+      if (tableDetected) {
+        tableBoxes.push({
+          type: "table",
+          name: "Detected Table",
+          x: 50,
+          y: 50,
+          width: 400,
+          height: 200,
+          page: i,
+          rowCount: 5,
+          colCount: 3,
+        });
+      }
+    }
+    return tableBoxes;
+  };
 
   const handleSaveTag = ({ selectedFont, isTable }) => {
     if (!drawBox || !selectedBoxName) return;
@@ -467,8 +308,6 @@ function App() {
       rowCount: isTable ? rowCount : undefined,
       colCount: isTable ? colCount : undefined,
       containsTable: isTable,
-      rowPositions: isTable ? Array.from({ length: rowCount + 1 }, (_, i) => (i * drawBox.height) / rowCount) : undefined,
-      colPositions: isTable ? Array.from({ length: colCount + 1 }, (_, i) => (i * drawBox.width) / colCount) : undefined,
     };
 
     console.log("Attempting to save new tag:", newTag);
@@ -512,13 +351,32 @@ function App() {
       return updatedElements;
     });
 
-    // Update selectedBox to reflect the new tag
-    setSelectedBox(newTag);
+    // Ensure selectedBox reflects the new tag if applicable
+    setSelectedBox((prev) =>
+      prev?.id === newTag.id ? { ...prev, ...newTag } : newTag
+    );
 
     // Reset drawBox and close modal
     setDrawBox(null);
-    setModalState(prev => ({ ...prev, taggingModal: false }));
+    setShowTextModal(false);
   };
+
+  const validateLoadedTemplate = ({ jsonData, pdfBuffer }) => {
+    if (!jsonData || !Array.isArray(jsonData.taggingInformation)) {
+      console.error("Invalid JSON data in template:", jsonData);
+      alert("The selected template is invalid. Please choose another one.");
+      return false;
+    }
+
+    if (!pdfBuffer) {
+      console.error("Missing PDF buffer in template.");
+      alert("The selected template does not include a valid PDF.");
+      return false;
+    }
+
+    return true;
+  };
+
 
   const doBoxesOverlap = (box1, box2) => {
     const buffer = 1;
@@ -530,253 +388,217 @@ function App() {
     );
   };
 
-  // Navigation functions
-  const goToPreviousPage = () => {
-    if (currentPage > 0) {
-      setCurrentPage(currentPage - 1);
-    }
-  };
-
-  const goToNextPage = () => {
-    if (pdfDoc && currentPage < pdfDoc.numPages - 1) {
-      setCurrentPage(currentPage + 1);
-    }
-  };
-
   return (
-    <div className="container-fluid" style={{ height: "100vh" }}>
-      <div className="row" style={{ height: "100%" }}>
-        {/* Left Panel for Upload and Tagging */}
-        <div
-          className="col-md-3 p-4 d-flex flex-column justify-content-between"
-          style={{
-            backgroundColor: "#f8f9fa",
-            boxShadow: "2px 2px 8px rgba(0,0,0,0.1)",
-            borderRadius: "8px",
-            height: "100vh",
-            border: "1px solid #e0e0e0",
-          }}
+  <div className="container-fluid" style={{ height: "100vh" }}>
+    <div className="row" style={{ height: "100%" }}>
+      {/* Left Panel for Upload and Tagging */}
+      <div
+        className="col-md-3 p-4 d-flex flex-column justify-content-between"
+        style={{
+          backgroundColor: "#f8f9fa",
+          boxShadow: "2px 2px 8px rgba(0,0,0,0.1)",
+          borderRadius: "8px",
+          height: "100vh",
+          border: "1px solid #e0e0e0",
+        }}
+      >
+        {/* Upload Section */}
+        <PdfUploader
+          ref={pdfUploaderRef}
+          fileInputRef={fileInputRef}
+          setPdfDoc={setPdfDoc}
+          setCurrentPage={setCurrentPage}
+          setTaggedElements={setTaggedElements}
+          generateUniqueId={generateUniqueId}
+          extractImageBoxesFromPdf={extractImageBoxesFromPdf}
+          extractTableBoxesFromPdf={extractTableBoxesFromPdf}
+        />
+       
+
+        {/* Initial Modal */}
+        <InitialTemplateModal
+          show={showInitialModal}
+          onHide={() => setShowInitialModal(false)}
+          onCreateNew={handleCreateNew}
+          onLoadExisting={handleLoadExisting}
+        />
+
+        {/* New Template Modal */}
+        <NewTemplateModal
+          show={showNewTemplateModal}
+          onHide={() => setShowNewTemplateModal(false)}
+          onSave={handleSaveTemplate}
+          fileInputRef={fileInputRef} // Pass the file input ref
+        />
+
+        {/* Actions Section */}
+        <PDFActionsPanel
+          pdfDoc={pdfDoc}
+          setTaggedElements={setTaggedElements}
+          uploadedFonts={uploadedFonts}
+          onUploadFont={(newFont) =>
+            setUploadedFonts((prevFonts) => [...prevFonts, newFont])
+          }
+        />
+
+        {/* Template Manager */}
+        <Templates
+          taggedElements={taggedElements}
+          setTaggedElements={setTaggedElements}
+          templateName={templateName}
+          fileInputRef={fileInputRef}
+          setTemplateName={setTemplateName}
+          onLoadTemplate={handleTemplateLoad} // Load the template's PDF
+        />
+
+        {/* Create Tagged PDF */}
+        <button
+          className="btn btn-success w-100"
+          onClick={createTaggedPdf}
+          style={{ borderRadius: "8px" }}
         >
-          {/* Upload Section */}
-          <PdfUploader
-            ref={pdfUploaderRef}
-            fileInputRef={fileInputRef}
-            setPdfDoc={setPdfDoc}
-            setCurrentPage={setCurrentPage}
-            setTaggedElements={setTaggedElements}
-            generateUniqueId={generateUniqueId}
-            extractImageBoxesFromPdf={extractImageBoxesFromPdf}
-            extractTableBoxesFromPdf={extractTableBoxesFromPdf}
-          />
-          
-          {/* Initial Modal */}
-          <InitialTemplateModal
-            show={showInitialModal}
-            onHide={() => setShowInitialModal(false)}
-            onCreateNew={handleCreateNew}
-            onLoadExisting={handleLoadExisting}
-          />
-
-          {/* New Template Modal */}
-          <NewTemplateModal
-            show={showNewTemplateModal}
-            onHide={() => setShowNewTemplateModal(false)}
-            onSave={handleSaveTemplate}
-            fileInputRef={fileInputRef} // Pass the file input ref
-          />
-
-          {/* Actions Section */}
-          <PDFActionsPanel
-            pdfDoc={pdfDoc}
-            setTaggedElements={setTaggedElements}
-            uploadedFonts={uploadedFonts}
-            onUploadFont={(newFont) =>
-              setUploadedFonts((prevFonts) => [...prevFonts, newFont])
-            }
-          />
-
-          {/* Template Manager */}
-          <Templates
-            taggedElements={taggedElements}
-            setTaggedElements={setTaggedElements}
-            templateName={templateName}
-            fileInputRef={fileInputRef}
-            setTemplateName={setTemplateName}
-            onLoadTemplate={handleTemplateLoad} // Load the template's PDF
-          />
-
-          {/* Navigation Controls */}
-          {pdfDoc && (
-            <div className="d-flex justify-content-between mb-3">
-              <button 
-                className="btn btn-secondary" 
-                onClick={goToPreviousPage}
-                disabled={currentPage === 0}
-              >
-                <i className="fas fa-arrow-left mr-2"></i> Previous Page
-              </button>
-              <span className="align-self-center">
-                Page {currentPage + 1} of {pdfDoc.numPages}
-              </span>
-              <button 
-                className="btn btn-secondary" 
-                onClick={goToNextPage}
-                disabled={currentPage >= pdfDoc.numPages - 1}
-              >
-                Next Page <i className="fas fa-arrow-right ml-2"></i>
-              </button>
-            </div>
-          )}
-
-          {/* Create Tagged PDF */}
-          <button
-            className="btn btn-success w-100"
-            onClick={createTaggedPdf}
-            style={{ borderRadius: "8px" }}
-          >
-            <i className="fas fa-save mr-2"></i> Create Tagged PDF
-          </button>
-        </div>
-
-        {/* Center PDF Preview Panel */}
-        <div
-          className="col-md-6 mx-auto p-3"
-          style={{
-            backgroundColor: "white",
-            boxShadow: "2px 2px 8px rgba(0,0,0,0.1)",
-            borderRadius: "8px",
-            height: "auto",
-            minHeight: "100vh",
-            border: "1px solid #e0e0e0",
-            overflow: "visible", 
-          }}
-        >
-          {/* Conditionally render the loaded PDF */}
-          {pdfDoc ? (
-            <CanvasDisplay
-              pdfDoc={pdfDoc}
-              currentPage={currentPage}
-              boxes={taggedElements}
-              detectedTables={detectedTables}
-              setDrawBox={setDrawBox}
-              setShowTextModal={setShowTextModal}
-              setSelectedAltText={setSelectedAltText}
-              setSelectedBoxIndex={setSelectedBoxIndex}
-              setSelectedImageIndex={setSelectedImageIndex}
-              taggedElements={taggedElements}
-              setShowEditBoxModal={setShowEditBoxModal}
-              setTaggedElements={setTaggedElements}
-              selectedBox={selectedBox}
-              setSelectedBox={setSelectedBox}
-              canvasRef={canvasRef}
-              uploadedFonts={uploadedFonts}
-              setModalState={setModalState}
-              tableData={{
-                rowCount: selectedBox?.rowCount || 2,
-                colCount: selectedBox?.colCount || 2,
-                rowPositions: selectedBox?.rowPositions || [],
-                colPositions: selectedBox?.colPositions || [],
-              }}
-            />
-          ) : (
-            <p className="text-muted text-center">
-              No PDF loaded. Please upload a PDF or load a template.
-            </p>
-          )}
-        </div>
-        
-        {/* Run table detection when PDF is loaded */}
-        {pdfDoc && 
-          <TableDetector 
-            pdfDoc={pdfDoc} 
-            onTablesDetected={setDetectedTables}
-            setTaggedElements={setTaggedElements}
-          />
-        }
-
-        {/* Right Panel for Tagged Elements */}
-        <div
-          className="col-md-3 p-4"
-          style={{
-            backgroundColor: "#f8f9fa",
-            boxShadow: "2px 2px 8px rgba(0,0,0,0.1)",
-            borderRadius: "8px",
-            height: "100vh",
-            border: "1px solid #e0e0e0",
-            overflowY: "auto",
-          }}
-        >
-          <TaggedElementsPanel
-            taggedElements={taggedElements}
-            setTaggedElements={setTaggedElements}
-            pdfDoc={pdfDoc}
-            currentPage={currentPage}
-            canvasRef={canvasRef}
-          />
-        </div>
+          <i className="fas fa-save mr-2"></i> Create Tagged PDF
+        </button>
       </div>
 
-      {/* Modal Manager - Central place for all modals */}
-      <ModalManager
-        modalState={modalState}
-        setModalState={setModalState}
-        taggingModalProps={{
-          handleSave: showAltTextModal ? handleSaveAltText : handleSaveTag,
-          languages: [
-            { code: "sv", name: "Swedish" },
-            { code: "en", name: "English" },
-          ],
-          headingType,
-          setHeadingType,
-          setMergeCandidate,
-          setShowMergeModal: (show) =>
-            setModalState((prev) => ({ ...prev, mergeModal: show })),
-          taggedElements,
-          generateUniqueId,
-          language,
-          selectedBox: drawBox,
-          setTaggedElements,
-          setLanguage,
-          selectedBoxName,
-          setSelectedBoxName,
-          fonts: uploadedFonts,
-          rowCount,
-          setRowCount,
-          colCount,
-          setColCount,
-          pdfDoc,
-          isAltText: showAltTextModal,
-          altText: selectedAltText,
-          setAltText: setSelectedAltText,
+      {/* Center PDF Preview Panel */}
+      <div
+        className="col-md-6 mx-auto p-3"
+        style={{
+          backgroundColor: "white",
+          boxShadow: "2px 2px 8px rgba(0,0,0,0.1)",
+          borderRadius: "8px",
+          height: "auto",
+          minHeight: "100vh",
+          border: "1px solid #e0e0e0",
+          overflow: "visible", 
         }}
-        mergeModalProps={{
-          mergeCandidate,
-          setTaggedElements,
-        }}
-        editBoxModalProps={{
-          taggedElements,
-          setTaggedElements,
-          selectedBoxIndex,
-          selectedBox,
-          languages: [
-            { code: "sv", name: "Swedish" },
-            { code: "en", name: "English" },
-          ],
-          language,
-          fonts: uploadedFonts,
-          detectedTables: detectedTables,
-          pdfDoc,
-        }}
-        tableEditModalProps={{
-          taggedElements,
-          setTaggedElements,
-          selectedBoxIndex,
-          tableData: selectedBox?.type === "table" ? selectedBox : null,
-          pdfDoc,
-        }}
-      />
-    </div>
-  );
-}
+      >
+        {/* Conditionally render the loaded PDF */}
 
+        {pdfDoc ? (
+          <CanvasDisplay
+            pdfDoc={pdfDoc}
+            currentPage={currentPage}
+            boxes={taggedElements}
+            detectedTables={detectedTables}
+            setDrawBox={setDrawBox}
+            setShowTextModal={setShowTextModal}
+            setSelectedAltText={setSelectedAltText}
+            setSelectedBoxIndex={setSelectedBoxIndex}
+            setSelectedImageIndex={setSelectedImageIndex}
+            taggedElements={taggedElements}
+            setShowEditBoxModal={setShowEditBoxModal}
+            setTaggedElements={setTaggedElements}
+            setSelectedBox={setSelectedBox}
+            selectedBox={selectedBox}
+            canvasRef={canvasRef}
+            
+            uploadedFonts={uploadedFonts}
+            setModalState={setModalState}
+            tableData={{
+              rowCount: selectedBox?.rowCount || 2,
+              colCount: selectedBox?.colCount || 2,
+              rowPositions: selectedBox?.rowPositions || [],
+              colPositions: selectedBox?.colPositions || [],
+            }}
+          />
+        ) : (
+          <p className="text-muted text-center">
+            No PDF loaded. Please upload a PDF or load a template.
+          </p>
+        )}
+      </div>
+      {pdfDoc && 
+      <TableDetector 
+      pdfDoc={pdfDoc} 
+      onTablesDetected={setDetectedTables}
+      setTaggedElements={setTaggedElements}
+       />}
+
+      {/* Right Panel for Tagged Elements */}
+      <div
+        className="col-md-3 p-4"
+        style={{
+          backgroundColor: "#f8f9fa",
+          boxShadow: "2px 2px 8px rgba(0,0,0,0.1)",
+          borderRadius: "8px",
+          height: "100vh",
+          border: "1px solid #e0e0e0",
+          overflowY: "auto",
+        }}
+      >
+        <TaggedElementsPanel
+          taggedElements={taggedElements}
+          setTaggedElements={setTaggedElements}
+          pdfDoc={pdfDoc}
+          currentPage={currentPage}
+          canvasRef={canvasRef}
+        />
+      </div>
+    </div>
+
+    {/* Modals */}
+    <ModalManager
+      modalState={modalState}
+      setModalState={setModalState}
+      taggingModalProps={{
+        handleSave: showAltTextModal ? handleSaveAltText : handleSaveTag,
+        languages: [
+          { code: "sv", name: "Swedish" },
+          { code: "en", name: "English" },
+        ],
+        headingType,
+        setHeadingType,
+        setMergeCandidate,
+        setShowMergeModal: (show) =>
+          setModalState((prev) => ({ ...prev, mergeModal: show })),
+        taggedElements,
+        generateUniqueId,
+        language,
+        selectedBox: drawBox,
+        setTaggedElements,
+        setLanguage,
+        selectedBoxName,
+        setSelectedBoxName,
+        fonts: uploadedFonts,
+        rowCount,
+        setRowCount,
+        colCount,
+        setColCount,
+        pdfDoc,
+        isAltText: showAltTextModal,
+        altText: selectedAltText,
+        setAltText: setSelectedAltText,
+      }}
+      mergeModalProps={{
+        mergeCandidate,
+        setTaggedElements,
+      }}
+      editBoxModalProps={{
+        taggedElements,
+        setTaggedElements,
+        selectedBoxIndex,
+        languages: [
+          { code: "sv", name: "Swedish" },
+          { code: "en", name: "English" },
+        ],
+        language,
+        fonts: uploadedFonts,
+        tableData: selectedBox?.tables,
+        onSave: handleSaveTableData,
+        pdfDoc,
+      }}
+      tableEditModalProps={{
+        taggedElements,
+        setTaggedElements,
+        selectedBoxIndex,
+        tableData: selectedBox?.tables,
+        pdfDoc,
+      }}
+    />
+  </div>
+);
+
+}
 export default App;
